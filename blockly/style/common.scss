@@ -569,7 +569,7 @@ $aniGifPreviewHeight: 60px;
   }
 
   @media screen and (orientation: portrait) and (max-device-width: 900px) {
-    display: block;
+    display: none;
   }
 }
 

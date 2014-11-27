@@ -34,6 +34,9 @@ group :development, :test do
   gem 'chromedriver-helper', '~> 0.0.7'
   gem 'colorize'
   gem 'parallel'
+
+  # for local testing
+  gem 'thin'
 end
 
 group :doc do
