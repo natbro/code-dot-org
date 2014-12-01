@@ -366,6 +366,10 @@ html, body {
   }
 }
 
+.hide_on_mobileapp {
+  display: none;
+}
+
 #locale {
   font-family: sans-serif;
   height: 24px;

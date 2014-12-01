@@ -123,13 +123,15 @@ BlocklyApps.init = function(config) {
 
   BlocklyApps.share = config.share;
 
+  BlocklyApps.mobileApp = (navigator.userAgent.match(/HOC-mobile/) != null);
+
   // if true, dont provide links to share on fb/twitter
   BlocklyApps.disableSocialShare = config.disableSocialShare;
   BlocklyApps.sendToPhone = config.sendToPhone;
   BlocklyApps.noPadding = config.no_padding;
 
   BlocklyApps.IDEAL_BLOCK_NUM = config.level.ideal || Infinity;
-  BlocklyApps.MIN_WORKSPACE_HEIGHT = config.level.minWorkspaceHeight || 800;
+  BlocklyApps.MIN_WORKSPACE_HEIGHT = BlocklyApps.mobileApp ? (window.screen.availHeight-50) : (config.level.minWorkspaceHeight || 800);
   BlocklyApps.REQUIRED_BLOCKS = config.level.requiredBlocks || [];
 
   // enableShowCode defaults to true if not defined
