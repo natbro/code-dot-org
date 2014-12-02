@@ -436,7 +436,7 @@ BlocklyApps.init = function(config) {
     // Enable param & var editing in levelbuilder, regardless of level setting
     config.level.disableParamEditing = false;
     config.level.disableVariableEditing = false;
-  } else if (!BlocklyApps.noPadding) {
+  } else if (!config.hide_source) {
     visualizationColumn.style.minHeight =
         BlocklyApps.MIN_WORKSPACE_HEIGHT + 'px';
   }
@@ -471,7 +471,8 @@ BlocklyApps.init = function(config) {
           phone_share_url: config.send_to_phone_url
         },
         sendToPhone: config.sendToPhone,
-        twitter: config.twitter
+        twitter: config.twitter,
+        onMainPage: true
       }));
 
       dom.addClickTouchEvent(openWorkspace, function() {
@@ -532,7 +533,7 @@ BlocklyApps.init = function(config) {
       if (BlocklyApps.noPadding) {
         upSale.style.marginLeft = '10px';
       }
-    } else if (!dom.isMobile()) {
+    } else {
       upSale.innerHTML = require('./templates/learn.html')();
     }
     belowViz.appendChild(upSale);
@@ -684,7 +685,8 @@ BlocklyApps.init = function(config) {
       BlocklyApps.editor = new droplet.Editor(document.getElementById('codeTextbox'), {
         mode: 'javascript',
         modeOptions: utils.generateDropletModeOptions(config.level.codeFunctions),
-        palette: utils.generateDropletPalette(config.level.codeFunctions)
+        palette: utils.generateDropletPalette(config.level.codeFunctions,
+                                              config.level.categoryInfo)
       });
 
       if (config.afterInject) {
@@ -778,16 +780,14 @@ BlocklyApps.init = function(config) {
   });
   window.addEventListener('resize', BlocklyApps.onResize);
 
-  // call initial onResize() asynchronously - need 100ms delay to work
-  // around relayout which changes height on the left side to the proper
-  // value
+  // Call initial onResize() asynchronously - need 10ms delay to work around
+  // relayout which changes height on the left side to the proper value
   window.setTimeout(function() {
-      BlocklyApps.onResize();
-      var event = document.createEvent('UIEvents');
-      event.initEvent('resize', true, true);  // event type, bubbling, cancelable
-      window.dispatchEvent(event);
-    },
-    100);
+    BlocklyApps.onResize();
+    var event = document.createEvent('UIEvents');
+    event.initEvent('resize', true, true);  // event type, bubbling, cancelable
+    window.dispatchEvent(event);
+  }, 10);
 
   BlocklyApps.reset(true);
 
@@ -1025,7 +1025,15 @@ BlocklyApps.onResize = function() {
 
   div.style.top = divParent.offsetTop + 'px';
   var fullWorkspaceWidth = parentWidth - (gameWidth + WORKSPACE_PLAYSPACE_GAP);
+  var oldWidth = parseInt(div.style.width, 10) || div.getBoundingClientRect().width;
   div.style.width = fullWorkspaceWidth + 'px';
+
+  // Keep blocks static relative to the right edge in RTL mode
+  if (BlocklyApps.usingBlockly && Blockly.RTL && (fullWorkspaceWidth - oldWidth !== 0)) {
+    Blockly.mainBlockSpace.getTopBlocks().forEach(function(topBlock) {
+      topBlock.moveBy(fullWorkspaceWidth - oldWidth, 0);
+    });
+  }
 
   if (BlocklyApps.isRtl()) {
     div.style.marginRight = (gameWidth + WORKSPACE_PLAYSPACE_GAP) + 'px';
@@ -1051,58 +1059,40 @@ BlocklyApps.onResize = function() {
   BlocklyApps.resizeHeaders(fullWorkspaceWidth);
 };
 
-// |         toolbox-header           | workspace-header  | show-code-header |
+// |          toolbox-header          | workspace-header  | show-code-header |
 // |
-// | categoriesWidth |  toolboxWidth  |
+// |           toolboxWidth           |
 // |                 |         <--------- workspaceWidth ---------->         |
 // |         <---------------- fullWorkspaceWidth ----------------->         |
 BlocklyApps.resizeHeaders = function (fullWorkspaceWidth) {
-  var categoriesWidth = 0;
-  var categories = BlocklyApps.editCode ?
-      document.querySelector('.droplet-palette-wrapper') :
-      Blockly.mainBlockSpaceEditor.toolbox &&
-      Blockly.mainBlockSpaceEditor.toolbox.HtmlDiv;
-  if (categories) {
+  var minWorkspaceWidthForShowCode = BlocklyApps.editCode ? 250 : 450;
+  var toolboxWidth = 0;
+  if (BlocklyApps.editCode) {
     // If in the droplet editor, but not using blocks, keep categoryWidth at 0
     if (!BlocklyApps.editCode || BlocklyApps.editor.currentlyUsingBlocks) {
-      // set CategoryWidth based on the block toolbox/palette width:
-      categoriesWidth = parseInt(window.getComputedStyle(categories).width, 10);
+      // Set toolboxWidth based on the block palette width:
+      var categories = document.querySelector('.droplet-palette-wrapper');
+      toolboxWidth = parseInt(window.getComputedStyle(categories).width, 10);
     }
-  }
-
-  var workspaceWidth;
-  var toolboxWidth;
-  if (BlocklyApps.usingBlockly) {
-    workspaceWidth = Blockly.mainBlockSpaceEditor.getBlockSpaceWidth();
+  } else if (BlocklyApps.usingBlockly) {
     toolboxWidth = Blockly.mainBlockSpaceEditor.getToolboxWidth();
   }
-  else {
-    workspaceWidth = fullWorkspaceWidth - categoriesWidth;
-    toolboxWidth = 0;
-  }
 
-  var headers = document.getElementById('headers');
-  var workspaceHeader = document.getElementById('workspace-header');
-  var toolboxHeader = document.getElementById('toolbox-header');
   var showCodeHeader = document.getElementById('show-code-header');
-
-  var showCodeWidth;
-  var minWorkspaceWidthForShowCode = BlocklyApps.editCode ? 250 : 450;
+  var showCodeWidth = 0;
   if (BlocklyApps.enableShowCode &&
-      (workspaceWidth - toolboxWidth > minWorkspaceWidthForShowCode)) {
+      (fullWorkspaceWidth - toolboxWidth > minWorkspaceWidthForShowCode)) {
     showCodeWidth = parseInt(window.getComputedStyle(showCodeHeader).width, 10);
     showCodeHeader.style.display = "";
   }
   else {
-    showCodeWidth = 0;
     showCodeHeader.style.display = "none";
   }
 
-  headers.style.width = (categoriesWidth + workspaceWidth) + 'px';
-  toolboxHeader.style.width = (categoriesWidth + toolboxWidth) + 'px';
-  workspaceHeader.style.width = (workspaceWidth -
-                                 toolboxWidth -
-                                 showCodeWidth) + 'px';
+  document.getElementById('headers').style.width = fullWorkspaceWidth + 'px';
+  document.getElementById('toolbox-header').style.width = toolboxWidth + 'px';
+  document.getElementById('workspace-header').style.width =
+      (fullWorkspaceWidth - toolboxWidth - showCodeWidth) + 'px';
 };
 
 /**
@@ -1867,6 +1857,7 @@ exports.isNextStepSafeWhileUnwinding = function (interpreter) {
     case "CallExpression":
     case "Identifier":
     case "Literal":
+    case "Program":
       return true;
   }
   return false;
@@ -1912,9 +1903,11 @@ function aceFindRow(cumulativeLength, rows, rowe, pos) {
   return mid;
 }
 
-/**
- * Selects code in an ace editor.
- */
+exports.isAceBreakpointRow = function (session, userCodeRow) {
+  var bps = session.getBreakpoints();
+  return Boolean(bps[userCodeRow]);
+};
+
 function createSelection (selection, cumulativeLength, start, end) {
   var range = selection.getRange();
 
@@ -1926,9 +1919,15 @@ function createSelection (selection, cumulativeLength, start, end) {
   selection.setSelectionRange(range);
 }
 
+/**
+ * Selects code in droplet/ace editor.
+ *
+ * Returns the row (line) of code highlighted. If nothing is highlighted
+ * because it is outside of the userCode area, the return value is -1
+ */
 exports.selectCurrentCode = function (interpreter, editor, cumulativeLength,
                                       userCodeStartOffset, userCodeLength) {
-  var inUserCode = false;
+  var userCodeRow = -1;
   if (interpreter.stateStack[0]) {
     var node = interpreter.stateStack[0].node;
     // Adjust start/end by Webapp.userCodeStartOffset since the code running
@@ -1940,21 +1939,20 @@ exports.selectCurrentCode = function (interpreter, editor, cumulativeLength,
     // code (not inside code we inserted before or after their code that is
     // not visible in the editor):
     if (start > 0 && start < userCodeLength) {
+      userCodeRow = aceFindRow(cumulativeLength, 0, cumulativeLength.length, start);
       // Highlight the code being executed in each step:
       if (editor.currentlyUsingBlocks) {
         var style = {color: '#FFFF22'};
-        var line = aceFindRow(cumulativeLength, 0, cumulativeLength.length, start);
         editor.clearLineMarks();
         // NOTE: replace markLine with this new mark() call once we have a new
         // version of droplet
         
-        // editor.mark(line, start - cumulativeLength[line], style);
-        editor.markLine(line, style);
+        // editor.mark(userCodeRow, start - cumulativeLength[userCodeRow], style);
+        editor.markLine(userCodeRow, style);
       } else {
         var selection = editor.aceEditor.getSelection();
         createSelection(selection, cumulativeLength, start, end);
       }
-      inUserCode = true;
     }
   } else {
     if (editor.currentlyUsingBlocks) {
@@ -1963,7 +1961,7 @@ exports.selectCurrentCode = function (interpreter, editor, cumulativeLength,
       editor.aceEditor.getSelection().clearSelection();
     }
   }
-  return inUserCode;
+  return userCodeRow;
 };
 
 /**
@@ -2398,9 +2396,12 @@ exports.displayFeedback = function(options) {
     $("#print_frame").remove(); // Remove the iframe when the print dialogue has been launched
   }
 
-  $("#print-button").click(function() {
-    createHiddenPrintWindow(options.feedbackImage);
-  });
+  var printButton = feedback.querySelector('#print-button');
+  if (printButton) {
+    dom.addClickTouchEvent(printButton, function() {
+      createHiddenPrintWindow(options.feedbackImage);
+    });
+  }
 
   feedbackDialog.show({
     backdrop: (options.app === 'flappy' ? 'static' : true)
@@ -2583,6 +2584,11 @@ var getFeedbackMessage = function(options) {
       // Free plays
       case TestResults.FREE_PLAY:
         message = options.appStrings.reinfFeedbackMsg;
+        // reinfFeedbackMsg talks about sharing. If sharing is disabled, use
+        // a more generic message
+        if (options.level.disableSharing) {
+          message = msg.finalStage();
+        }
         break;
     }
   }
@@ -2625,7 +2631,6 @@ exports.createSharingDiv = function(options) {
     // Clear out our urls so that we don't display any of our social share links
     options.twitterUrl = undefined;
     options.facebookUrl = undefined;
-    options.saveToGalleryUrl = undefined;
     options.sendToPhone = false;
   } else {
 
@@ -8905,7 +8910,7 @@ escape = escape || function (html){
 };
 var buf = [];
 with (locals || {}) { (function(){ 
- buf.push('');1; var msg = require('../../locale/ca_es/common'); ; buf.push('\n\n');3; if (data.ok) {; buf.push('  <div class="farSide" style="padding: 1ex 3ex 0">\n    <button id="ok-button" class="secondary">\n      ', escape((5,  msg.dialogOK() )), '\n    </button>\n  </div>\n');8; }; buf.push('\n');9; if (data.previousLevel) {; buf.push('  <button id="back-button" class="launch">\n    ', escape((10,  msg.backToPreviousLevel() )), '\n  </button>\n');12; }; buf.push('\n');13; if (data.tryAgain) {; buf.push('  ');13; if (data.isK1 && !data.freePlay) {; buf.push('    <div id="again-button" class="launch arrow-container arrow-left">\n      <div class="arrow-head"><img src="', escape((14,  data.assetUrl('media/tryagain-arrow-head.png') )), '" alt="Arrowhead" width="67" height="130"/></div>\n      <div class="arrow-text">', escape((15,  msg.tryAgain() )), '</div>\n    </div>\n  ');17; } else {; buf.push('    ');17; if (data.hintRequestExperiment === "left") {; buf.push('      <button id="hint-request-button" class="launch">\n        ', escape((18,  msg.hintRequest() )), '\n      </button>\n      <button id="again-button" class="launch">\n        ', escape((21,  msg.tryAgain() )), '\n      </button>\n    ');23; } else if (data.hintRequestExperiment == "right") {; buf.push('      <button id="again-button" class="launch">\n        ', escape((24,  msg.tryAgain() )), '\n      </button>\n      <button id="hint-request-button" class="launch">\n        ', escape((27,  msg.hintRequest() )), '\n      </button>\n    ');29; } else {; buf.push('      <button id="again-button" class="launch">\n        ', escape((30,  msg.continueWorking() )), '\n      </button>\n    ');32; }; buf.push('  ');32; }; buf.push('');32; }; buf.push('\n');33; if (data.nextLevel) {; buf.push('  ');33; if (data.isK1 && !data.freePlay) {; buf.push('    <div id="continue-button" class="launch arrow-container arrow-right">\n      <div class="arrow-head"><img src="', escape((34,  data.assetUrl('media/next-arrow-head.png') )), '" alt="Arrowhead" width="66" height="130"/></div>\n      <div class="arrow-text">', escape((35,  msg.continue() )), '</div>\n    </div>\n  ');37; } else {; buf.push('    <button id="continue-button" class="launch" style="float: right">\n      ', escape((38,  msg.nextPuzzle() )), '\n    </button>\n  ');40; }; buf.push('');40; }; buf.push(''); })();
+ buf.push('');1; var msg = require('../../locale/ca_es/common'); ; buf.push('\n\n');3; if (data.ok) {; buf.push('  <div class="farSide" style="padding: 1ex 3ex 0">\n    <button id="ok-button" class="secondary">\n      ', escape((5,  msg.dialogOK() )), '\n    </button>\n  </div>\n');8; }; buf.push('\n');9; if (data.previousLevel) {; buf.push('  <button id="back-button" class="launch">\n    ', escape((10,  msg.backToPreviousLevel() )), '\n  </button>\n');12; }; buf.push('\n');13; if (data.tryAgain) {; buf.push('  ');13; if (data.isK1 && !data.freePlay) {; buf.push('    <div id="again-button" class="launch arrow-container arrow-left">\n      <div class="arrow-head"><img src="', escape((14,  data.assetUrl('media/tryagain-arrow-head.png') )), '" alt="Arrowhead" width="67" height="130"/></div>\n      <div class="arrow-text">', escape((15,  msg.tryAgain() )), '</div>\n    </div>\n  ');17; } else {; buf.push('    ');17; if (data.hintRequestExperiment === "left") {; buf.push('      <button id="hint-request-button" class="launch">\n        ', escape((18,  msg.hintRequest() )), '\n      </button>\n      <button id="again-button" class="launch">\n        ', escape((21,  msg.tryAgain() )), '\n      </button>\n    ');23; } else if (data.hintRequestExperiment == "right") {; buf.push('      <button id="again-button" class="launch">\n        ', escape((24,  msg.tryAgain() )), '\n      </button>\n      <button id="hint-request-button" class="launch">\n        ', escape((27,  msg.hintRequest() )), '\n      </button>\n    ');29; } else {; buf.push('      <button id="again-button" class="launch">\n        ', escape((30,  msg.tryAgain() )), '\n      </button>\n    ');32; }; buf.push('  ');32; }; buf.push('');32; }; buf.push('\n');33; if (data.nextLevel) {; buf.push('  ');33; if (data.isK1 && !data.freePlay) {; buf.push('    <div id="continue-button" class="launch arrow-container arrow-right">\n      <div class="arrow-head"><img src="', escape((34,  data.assetUrl('media/next-arrow-head.png') )), '" alt="Arrowhead" width="66" height="130"/></div>\n      <div class="arrow-text">', escape((35,  msg.continue() )), '</div>\n    </div>\n  ');37; } else {; buf.push('    <button id="continue-button" class="launch" style="float: right">\n      ', escape((38,  msg.continue() )), '\n    </button>\n  ');40; }; buf.push('');40; }; buf.push(''); })();
 } 
 return buf.join('');
 };
@@ -8968,7 +8973,7 @@ escape = escape || function (html){
 };
 var buf = [];
 with (locals || {}) { (function(){ 
- buf.push('');1; var msg = require('../../locale/ca_es/common') ; buf.push('\n\n');3; var root = location.protocol + '//' + location.host.replace('learn\.', ''); 
+ buf.push('');1; var msg = require('../../locale/ca_es/common') ; buf.push('\n\n');3; var root = location.protocol + '//' + location.host.replace('learn\.', '').replace('studio\.', ''); 
 ; buf.push('\n\n<div id="learn">\n\n  <h1><a href="', escape((7,  root )), '">', escape((7,  msg.wantToLearn() )), '</a></h1>\n  <a href="', escape((8,  root )), '"><img id="learn-to-code" src="', escape((8,  BlocklyApps.assetUrl('media/promo.png') )), '"></a>\n  <a href="', escape((9,  root )), '">', escape((9,  msg.watchVideo() )), '</a>\n  <a href="', escape((10,  root )), '">', escape((10,  msg.tryHOC() )), '</a>\n  <a href="', escape((11,  location.protocol + '//' + location.host 
 )), '">', escape((11,  msg.signup() )), '</a>\n\n</div>\n'); })();
 } 
@@ -9080,7 +9085,7 @@ escape = escape || function (html){
 };
 var buf = [];
 with (locals || {}) { (function(){ 
- buf.push('');1; var msg = require('../../locale/ca_es/common'); ; buf.push('\n');2; if (options.feedbackImage) { ; buf.push('\n  <div class="sharing">\n    <img class="feedback-image" src="', escape((4,  options.feedbackImage )), '">\n  </div>\n');6; } ; buf.push('\n\n<div class="sharing">\n');9; if (options.alreadySaved) { ; buf.push('\n  <div class="saved-to-gallery">\n    ', escape((11,  msg.savedToGallery() )), '\n  </div>\n');13; } else if (options.saveToGalleryUrl) { ; buf.push('\n  <div class="social-buttons">\n  <button id="save-to-gallery-button" class="launch">\n    ', escape((16,  msg.saveToGallery() )), '\n  </button>\n  <button id="print-button">\n    ', escape((19,  msg.print() )), '\n  </button>\n  </div>\n');22; } ; buf.push('\n\n');24; if (options.response && options.response.level_source) { ; buf.push('\n  ');25; if (options.appStrings && options.appStrings.sharingText) { ; buf.push('\n    <div>', escape((26,  options.appStrings.sharingText )), '</div>\n  ');27; } ; buf.push('\n\n  <div>\n    <input type="text" id="sharing-input" value=', escape((30,  options.response.level_source )), ' readonly>\n  </div>\n\n  <div class=\'social-buttons\'>\n    ');34; if (options.facebookUrl) {; buf.push('      <a href=\'', escape((34,  options.facebookUrl )), '\' target="_blank" class="popup-window">\n        <img src=\'', escape((35,  BlocklyApps.assetUrl("media/facebook_purple.png") )), '\' />\n      </a>\n    ');37; }; buf.push('\n    ');38; if (options.twitterUrl) {; buf.push('      <a href=\'', escape((38,  options.twitterUrl )), '\' target="_blank" class="popup-window">\n        <img src=\'', escape((39,  BlocklyApps.assetUrl("media/twitter_purple.png") )), '\' />\n      </a>\n    ');41; }; buf.push('    ');41; if (options.sendToPhone) {; buf.push('      <a id="sharing-phone" href="" onClick="return false;">\n        <img src=\'', escape((42,  BlocklyApps.assetUrl("media/phone_purple.png") )), '\' />\n      </a>\n    ');44; }; buf.push('  </div>\n');45; } ; buf.push('\n</div>\n<div id="send-to-phone" class="sharing" style="display: none">\n  <label for="phone">Enter a US phone number:</label>\n  <input type="text" id="phone" name="phone" />\n  <button id="phone-submit" onClick="return false;">Send</button>\n  <div id="phone-charges">A text message will be sent via <a href="http://twilio.com">Twilio</a>. Charges may apply to the recipient.</div>\n</div>\n'); })();
+ buf.push('');1; var msg = require('../../locale/ca_es/common'); ; buf.push('\n');2; if (options.feedbackImage) { ; buf.push('\n  <div class="sharing">\n    <img class="feedback-image" src="', escape((4,  options.feedbackImage )), '">\n  </div>\n');6; } ; buf.push('\n\n<div class="sharing">\n  <div class="social-buttons">\n  ');10; if (!options.onMainPage) { ; buf.push('\n    <button id="print-button">\n      ', escape((12,  msg.print() )), '\n    </button>\n  ');14; } ; buf.push('\n');15; if (options.alreadySaved) { ; buf.push('\n  <button class="saved-to-gallery" disabled>\n    ', escape((17,  msg.savedToGallery() )), '\n  </button>\n');19; } else if (options.saveToGalleryUrl) { ; buf.push('\n  <button id="save-to-gallery-button" class="launch">\n    ', escape((21,  msg.saveToGallery() )), '\n  </button>\n');23; } ; buf.push('\n  </div>\n\n');26; if (options.response && options.response.level_source) { ; buf.push('\n  ');27; if (options.appStrings && options.appStrings.sharingText) { ; buf.push('\n    <div>', escape((28,  options.appStrings.sharingText )), '</div>\n  ');29; } ; buf.push('\n\n  <div>\n    <input type="text" id="sharing-input" value=', escape((32,  options.response.level_source )), ' readonly>\n  </div>\n\n  <div class=\'social-buttons\'>\n    ');36; if (options.facebookUrl) {; buf.push('      <a href=\'', escape((36,  options.facebookUrl )), '\' target="_blank" class="popup-window">\n        <img src=\'', escape((37,  BlocklyApps.assetUrl("media/facebook_purple.png") )), '\' />\n      </a>\n    ');39; }; buf.push('\n    ');40; if (options.twitterUrl) {; buf.push('      <a href=\'', escape((40,  options.twitterUrl )), '\' target="_blank" class="popup-window">\n        <img src=\'', escape((41,  BlocklyApps.assetUrl("media/twitter_purple.png") )), '\' />\n      </a>\n    ');43; }; buf.push('    ');43; if (options.sendToPhone) {; buf.push('      <a id="sharing-phone" href="" onClick="return false;">\n        <img src=\'', escape((44,  BlocklyApps.assetUrl("media/phone_purple.png") )), '\' />\n      </a>\n    ');46; }; buf.push('  </div>\n');47; } ; buf.push('\n</div>\n<div id="send-to-phone" class="sharing" style="display: none">\n  <label for="phone">Enter a US phone number:</label>\n  <input type="text" id="phone" name="phone" />\n  <button id="phone-submit" onClick="return false;">Send</button>\n  <div id="phone-charges">A text message will be sent via <a href="http://twilio.com">Twilio</a>. Charges may apply to the recipient.</div>\n</div>\n'); })();
 } 
 return buf.join('');
 };
@@ -10364,7 +10369,7 @@ exports.install = function(blockly, blockInstallOptions) {
   generator.jump_by_constant = function() {
     // Generate JavaScript for moving forward or backward the internal number
     // of pixels without drawing.
-    var value = window.parseFloat(this.getTitleValue('VALUE'));
+    var value = window.parseFloat(this.getTitleValue('VALUE')) || 0;
     return 'Turtle.' + this.getTitleValue('DIR') +
         '(' + value + ', \'block_id_' + this.id + '\');\n';
   };
@@ -12494,15 +12499,17 @@ exports.load = function (assetUrl, id) {
 
   var CONFIGS = {
     anna: {
+      // slider speed gets divided by this value
+      speedModifier: 10,
       turtleNumFrames: 10,
       smoothAnimate: true,
       consolidateTurnAndMove: true,
       annaLine: skin.assetUrl('annaline.png'),
       annaLine_2x: skin.assetUrl('annaline_2x.png')
-
     },
 
     elsa: {
+      speedModifier: 10,
       turtleNumFrames: 20,
       decorationAnimationNumFrames: 19,
       smoothAnimate: true,
@@ -12513,6 +12520,9 @@ exports.load = function (assetUrl, id) {
   };
 
   var config = CONFIGS[skin.id];
+
+  // base skin properties here (can be overriden by CONFIG)
+  skin.speedModifier = 1;
 
   // Get properties from config
   var isAsset = /\.\S{3}$/; // ends in dot followed by three non-whitespace chars
@@ -12773,6 +12783,9 @@ var CANVAS_WIDTH = 400;
 
 var JOINT_RADIUS = 4;
 
+var SMOOTH_ANIMATE_STEP_SIZE = 5;
+var FAST_SMOOTH_ANIMATE_STEP_SIZE = 15;
+
 /**
  * Minimum joint segment length
  */
@@ -13022,7 +13035,7 @@ Turtle.drawLogOnCanvas = function(log, canvas) {
   while (log.length) {
     var tuple = log.shift();
     Turtle.step(tuple[0], tuple.splice(1), {smoothAnimate: false});
-    clearTuple();
+    resetStepInfo();
   }
   canvas.globalCompositeOperation = 'copy';
   canvas.drawImage(Turtle.ctxScratch.canvas, 0, 0);
@@ -13171,7 +13184,7 @@ Turtle.drawTurtle = function() {
       sourceX * retina + sourceWidth  * retina -0 > Turtle.avatarImage.width ||
       sourceY * retina + sourceHeight * retina > Turtle.avatarImage.height)
   {
-    if (console.log) {
+    if (console && console.log) {
       console.log("drawImage is out of source bounds!");
     }
     return;
@@ -13330,14 +13343,18 @@ BlocklyApps.reset = function(ignore) {
   // Stop the looping sound.
   BlocklyApps.stopLoopingAudio('start');
 
-  clearTuple();
+  resetStepInfo();
 };
 
-function clearTuple()
-{
+/**
+ * When smooth animate is true, steps can be broken up into multiple animations.
+ * At the end of each step, we want to reset any incremental information, which
+ * is what this does.
+ */
+function resetStepInfo() {
   Turtle.stepStartX = Turtle.x;
   Turtle.stepStartY = Turtle.y;
-  jumpDistanceCovered = 0;
+  Turtle.stepDistanceCovered = 0;
 }
 
 
@@ -13398,6 +13415,7 @@ BlocklyApps.runButtonClick = function() {
   }
   BlocklyApps.attempts++;
   Turtle.execute();
+
 };
 
 Turtle.evalCode = function(code) {
@@ -13475,11 +13493,6 @@ Turtle.execute = function() {
   }
 };
 
-// Divide each jump into substeps so that we can animate every movement.
-var jumpDistance = 5;
-var jumpDistanceCovered;
-
-
 /**
  * Special case: if we have a turn, followed by a move forward, then we can just
  * do the turn instantly and then begin the move forward in the same frame.
@@ -13514,7 +13527,6 @@ function checkforTurnAndMove() {
  * Attempt to execute one command from the log of API commands.
  */
 function executeTuple () {
-
   if (api.log.length === 0) {
     return false;
   }
@@ -13542,7 +13554,7 @@ function executeTuple () {
 
     if (tupleDone) {
       api.log.shift();
-      clearTuple();
+      resetStepInfo();
     }
   } while (executeSecondTuple);
 
@@ -13564,8 +13576,17 @@ function finishExecution () {
  * Iterate through the recorded path and animate the turtle's actions.
  */
 Turtle.animate = function() {
+
   // All tasks should be complete now.  Clean up the PID list.
   Turtle.pid = 0;
+
+  // Scale the speed non-linearly, to give better precision at the fast end.
+  var stepSpeed = 1000 * Math.pow(1 - Turtle.speedSlider.getValue(), 2) / skin.speedModifier;
+
+  // when smoothAnimate is true, we divide long steps into partitions of this
+  // size.
+  Turtle.smoothAnimateStepSize = (stepSpeed === 0 ?
+    FAST_SMOOTH_ANIMATE_STEP_SIZE : SMOOTH_ANIMATE_STEP_SIZE);
 
   if (level.editCode) {
     var stepped = true;
@@ -13602,49 +13623,44 @@ Turtle.animate = function() {
     }
   }
 
-  // Scale the speed non-linearly, to give better precision at the fast end.
-  var stepSpeed = 1000 * Math.pow(1 - Turtle.speedSlider.getValue(), 2);
-  if (skin.id == "anna" || skin.id == "elsa")
-  {
-    stepSpeed /= 10;
-  }
   Turtle.pid = window.setTimeout(Turtle.animate, stepSpeed);
 };
 
-
-Turtle.doSmoothAnimate = function(options, distance)
-{
+Turtle.calculateSmoothAnimate = function(options, distance) {
   var tupleDone = true;
+  var stepDistanceCovered = Turtle.stepDistanceCovered;
 
-  if (options && options.smoothAnimate)
-  {
+  if (options && options.smoothAnimate) {
     var fullDistance = distance;
+    var smoothAnimateStepSize = Turtle.smoothAnimateStepSize;
 
     if (fullDistance < 0) {
       // Going backward.
-      if (jumpDistanceCovered - jumpDistance <= fullDistance) {
+      if (stepDistanceCovered - smoothAnimateStepSize <= fullDistance) {
         // clamp at maximum
-        distance = fullDistance - jumpDistanceCovered;
-        jumpDistanceCovered = fullDistance;
+        distance = fullDistance - stepDistanceCovered;
+        stepDistanceCovered = fullDistance;
       } else {
-        distance = -jumpDistance;
-        jumpDistanceCovered -= jumpDistance;
+        distance = -smoothAnimateStepSize;
+        stepDistanceCovered -= smoothAnimateStepSize;
         tupleDone = false;
       }
 
     } else {
       // Going foward.
-      if (jumpDistanceCovered + jumpDistance >= fullDistance) {
+      if (stepDistanceCovered + smoothAnimateStepSize >= fullDistance) {
         // clamp at maximum
-        distance = fullDistance - jumpDistanceCovered;
-        jumpDistanceCovered = fullDistance;
+        distance = fullDistance - stepDistanceCovered;
+        stepDistanceCovered = fullDistance;
       } else {
-        distance = jumpDistance;
-        jumpDistanceCovered += jumpDistance;
+        distance = smoothAnimateStepSize;
+        stepDistanceCovered += smoothAnimateStepSize;
         tupleDone = false;
       }
     }
   }
+
+  Turtle.stepDistanceCovered = stepDistanceCovered;
 
   return { tupleDone: tupleDone, distance: distance };
 };
@@ -13665,20 +13681,20 @@ Turtle.step = function(command, values, options) {
   switch (command) {
     case 'FD':  // Forward
       distance = values[0];
-      result = Turtle.doSmoothAnimate(options, distance);
+      result = Turtle.calculateSmoothAnimate(options, distance);
       tupleDone = result.tupleDone;
       Turtle.moveForward_(result.distance);
       break;
     case 'JF':  // Jump forward
       distance = values[0];
-      result = Turtle.doSmoothAnimate(options, distance);
+      result = Turtle.calculateSmoothAnimate(options, distance);
       tupleDone = result.tupleDone;
       Turtle.jumpForward_(result.distance);
       break;
     case 'MV':  // Move (direction)
       distance = values[0];
       heading = values[1];
-      result = Turtle.doSmoothAnimate(options, distance);
+      result = Turtle.calculateSmoothAnimate(options, distance);
       tupleDone = result.tupleDone;
       Turtle.setHeading_(heading);
       Turtle.moveForward_(result.distance);
@@ -13686,14 +13702,14 @@ Turtle.step = function(command, values, options) {
     case 'JD':  // Jump (direction)
       distance = values[0];
       heading = values[1];
-      result = Turtle.doSmoothAnimate(options, distance);
+      result = Turtle.calculateSmoothAnimate(options, distance);
       tupleDone = result.tupleDone;
       Turtle.setHeading_(heading);
       Turtle.jumpForward_(result.distance);
       break;
     case 'RT':  // Right Turn
       distance = values[0];
-      result = Turtle.doSmoothAnimate(options, distance);
+      result = Turtle.calculateSmoothAnimate(options, distance);
       tupleDone = result.tupleDone;
       Turtle.turnByDegrees_(result.distance);
       break;
@@ -13813,7 +13829,7 @@ Turtle.moveForward_ = function (distance) {
     return;
   }
   if (Turtle.isDrawingWithPattern) {
-    Turtle.drawForwardWithPattern_(distance);
+    Turtle.drawForwardLineWithPattern_(distance);
 
     // Frozen gets both a pattern and a line over the top of it.
     if (skin.id != "elsa" && skin.id != "anna") {
@@ -13830,11 +13846,6 @@ Turtle.drawForward_ = function (distance) {
   } else {
     Turtle.drawForwardLine_(distance);
   }
-};
-
-Turtle.drawForwardWithPattern_ = function (distance) {
-  //TODO: deal with drawing joints, if appropriate
-  Turtle.drawForwardLineWithPattern_(distance);
 };
 
 /**
@@ -13891,20 +13902,25 @@ Turtle.drawForwardLineWithPattern_ = function (distance) {
     startX = Turtle.stepStartX;
     startY = Turtle.stepStartY;
 
-    var lineDistance = Math.abs(jumpDistanceCovered);
+    var lineDistance = Math.abs(Turtle.stepDistanceCovered);
 
     Turtle.ctxPattern.save();
     Turtle.ctxPattern.translate(startX * retina, startY * retina);
-    Turtle.ctxPattern.rotate(Math.PI * (Turtle.heading - 90) / 180); // increment the angle and rotate the image.
-                                                                     // Need to subtract 90 to accomodate difference in canvas
-                                                                     // vs. Turtle direction
+    // increment the angle and rotate the image.
+    // Need to subtract 90 to accomodate difference in canvas vs. Turtle direction
+    Turtle.ctxPattern.rotate(Math.PI * (Turtle.heading - 90) / 180);
+
+    var clipSize = Math.min(Turtle.smoothAnimateStepSize, lineDistance);
 
     if (img.width !== 0) {
       Turtle.ctxPattern.drawImage(img,
-        Math.round(lineDistance * retina), 0,        // Start point for clipping image
-        jumpDistance * retina, img.height,           // clip region size
-        Math.round((jumpDistanceCovered - 7) * retina), Math.round((- 18) * retina),      // draw location relative to the ctx.translate point pre-rotation
-        jumpDistance * retina, img.height);
+        // Start point for clipping image
+        Math.round(lineDistance * retina), 0,
+        // clip region size
+        clipSize * retina, img.height,
+        // some mysterious hand-tweaking done by Brendan
+        Math.round((Turtle.stepDistanceCovered - 7) * retina), Math.round((- 18) * retina),
+        clipSize * retina, img.height);
     }
 
     Turtle.ctxPattern.restore();
@@ -13919,14 +13935,18 @@ Turtle.drawForwardLineWithPattern_ = function (distance) {
     Turtle.jumpForward_(distance);
     Turtle.ctxScratch.save();
     Turtle.ctxScratch.translate(startX, startY);
-    Turtle.ctxScratch.rotate(Math.PI * (Turtle.heading - 90) / 180); // increment the angle and rotate the image.
-                                                                     // Need to subtract 90 to accomodate difference in canvas
-                                                                     // vs. Turtle direction
+    // increment the angle and rotate the image.
+    // Need to subtract 90 to accomodate difference in canvas vs. Turtle direction
+    Turtle.ctxScratch.rotate(Math.PI * (Turtle.heading - 90) / 180);
+
     if (img.width !== 0) {
       Turtle.ctxScratch.drawImage(img,
-        0, 0,                                 // Start point for clipping image
-        distance+img.height / 2, img.height,  // clip region size
-        -img.height / 4, -img.height / 2,     // draw location relative to the ctx.translate point pre-rotation
+        // Start point for clipping image
+        0, 0,
+        // clip region size
+        distance+img.height / 2, img.height,
+        // draw location relative to the ctx.translate point pre-rotation
+        -img.height / 4, -img.height / 2,
         distance+img.height / 2, img.height);
     }
 
@@ -13977,7 +13997,7 @@ var displayFeedback = function() {
     level: level,
     feedbackImage: feedbackImageCanvas.canvas.toDataURL("image/png"),
     // add 'impressive':true to non-freeplay levels that we deem are relatively impressive (see #66990480)
-    showingSharing: level.freePlay || level.impressive,
+    showingSharing: !level.disableSharing && (level.freePlay || level.impressive),
     // impressive levels are already saved
     alreadySaved: level.impressive,
     // allow users to save freeplay levels to their gallery (impressive non-freeplay levels are autosaved)
@@ -14318,7 +14338,7 @@ exports.generateCodeAliases = function (codeFunctions, parentObjName) {
 /**
  * Generate a palette for the droplet editor based on some level data.
  */
-exports.generateDropletPalette = function (codeFunctions) {
+exports.generateDropletPalette = function (codeFunctions, categoryInfo) {
   // TODO: figure out localization for droplet scenario
   var palette = [
     {
@@ -14371,8 +14391,8 @@ exports.generateDropletPalette = function (codeFunctions) {
           block: '__ < __',
           title: 'Compare two numbers'
         }, {
-          block: 'random(1, 100)',
-          title: 'Get a random number in a range'
+          block: 'random()',
+          title: 'Get a random number between 0 and 1'
         }, {
           block: 'round(__)',
           title: 'Round to the nearest integer'
@@ -14381,10 +14401,10 @@ exports.generateDropletPalette = function (codeFunctions) {
           title: 'Absolute value'
         }, {
           block: 'max(__, __)',
-          title: 'Absolute value'
+          title: 'Maximum value'
         }, {
           block: 'min(__, __)',
-          title: 'Absolute value'
+          title: 'Minimum value'
         }
       ]
     }, {
@@ -14408,14 +14428,16 @@ exports.generateDropletPalette = function (codeFunctions) {
     }
   ];
 
-  var appPaletteCategory = {
-    name: 'Actions',
-    color: 'blue',
-    blocks: []
+  var defCategoryInfo = {
+    'Actions': {
+      'color': 'blue',
+      'blocks': []
+    }
   };
+  categoryInfo = categoryInfo || defCategoryInfo;
 
   if (codeFunctions) {
-    for (var i = 0, blockIndex = 0; i < codeFunctions.length; i++) {
+    for (var i = 0; i < codeFunctions.length; i++) {
       var cf = codeFunctions[i];
       if (cf.category === 'hidden') {
         continue;
@@ -14434,12 +14456,14 @@ exports.generateDropletPalette = function (codeFunctions) {
         block: block,
         title: cf.func
       };
-      appPaletteCategory.blocks[blockIndex] = blockPair;
-      blockIndex++;
+      categoryInfo[cf.category || 'Actions'].blocks.push(blockPair);
     }
   }
 
-  palette.unshift(appPaletteCategory);
+  for (var category in categoryInfo) {
+    categoryInfo[category].name = category;
+    palette.unshift(categoryInfo[category]);
+  }
 
   return palette;
 };
@@ -14450,7 +14474,7 @@ exports.generateDropletPalette = function (codeFunctions) {
 exports.generateDropletModeOptions = function (codeFunctions) {
   var modeOptions = {
     blockFunctions: [],
-    valueFunctions: [],
+    valueFunctions: ['random', 'round', 'abs', 'max', 'min'],
     eitherFunctions: [],
   };
 
@@ -14465,11 +14489,14 @@ exports.generateDropletModeOptions = function (codeFunctions) {
 
   if (codeFunctions) {
     for (var i = 0; i < codeFunctions.length; i++) {
-      if (codeFunctions[i].category === 'value') {
-        modeOptions.valueFunctions[i] = codeFunctions[i].func;
+      if (codeFunctions[i].type === 'value') {
+        modeOptions.valueFunctions.push(codeFunctions[i].func);
       }
-      else if (codeFunctions[i].category !== 'hidden') {
-        modeOptions.blockFunctions[i] = codeFunctions[i].func;
+      else if (codeFunctions[i].type === 'either') {
+        modeOptions.eitherFunctions.push(codeFunctions[i].func);
+      }
+      else if (codeFunctions[i].type !== 'hidden') {
+        modeOptions.blockFunctions.push(codeFunctions[i].func);
       }
     }
   }
@@ -14537,8 +14564,6 @@ exports.codeTooltip = function(d){return "Vegeu el codi JavaScript generat."};
 
 exports.continue = function(d){return "Continuar"};
 
-exports.continueWorking = function(d){return "Continue working"};
-
 exports.dialogCancel = function(d){return "Cancel·lar"};
 
 exports.dialogOK = function(d){return "OK"};
@@ -14587,8 +14612,6 @@ exports.nextLevel = function(d){return "Enhorabona! Has acabat el Puzzle! "+v(d,
 
 exports.nextLevelTrophies = function(d){return "Felicitats! Has acabat el Puzzle "+v(d,"puzzleNumber")+" i has guanyat "+p(d,"numTrophies",0,"ca",{"one":"un trofeu","other":n(d,"numTrophies")+" trofeus"})+"."};
 
-exports.nextPuzzle = function(d){return "Next puzzle"};
-
 exports.nextStage = function(d){return "Enhorabona! Heu completat "+v(d,"stageName")+"."};
 
 exports.nextStageTrophies = function(d){return "Enhorabona! Has acabat "+v(d,"stageName")+" i has guanyat "+p(d,"numTrophies",0,"ca",{"un":"a trophy","other":n(d,"numTrophies")+" trophies"})+"."};
@@ -14599,7 +14622,7 @@ exports.numLinesOfCodeWritten = function(d){return "Has escrit "+p(d,"numLines",
 
 exports.play = function(d){return "reprodueix"};
 
-exports.print = function(d){return "Print"};
+exports.print = function(d){return "Imprimeix"};
 
 exports.puzzleTitle = function(d){return "Puzzle "+v(d,"puzzle_number")+" de "+v(d,"stage_total")};
 
@@ -14615,9 +14638,11 @@ exports.score = function(d){return "puntuació"};
 
 exports.showCodeHeader = function(d){return "Mostra el Codi"};
 
-exports.showBlocksHeader = function(d){return "Show Blocks"};
+exports.showBlocksHeader = function(d){return "Mostra els blocs"};
 
 exports.showGeneratedCode = function(d){return "Mostra el Codi"};
+
+exports.stringEquals = function(d){return "string=?"};
 
 exports.subtitle = function(d){return "un entorn de programació visual"};
 
@@ -14641,9 +14666,9 @@ exports.hintRequest = function(d){return "Veure pista"};
 
 exports.backToPreviousLevel = function(d){return "Torna al nivell anterior"};
 
-exports.saveToGallery = function(d){return "Guarda-ho a la teva galeria"};
+exports.saveToGallery = function(d){return "Desa a la galeria"};
 
-exports.savedToGallery = function(d){return "Guardat a la teva galeria!"};
+exports.savedToGallery = function(d){return "Desat a la galeria!"};
 
 exports.shareFailure = function(d){return "Ho sentim, no podem compartir aquest programa."};
 
@@ -14653,7 +14678,7 @@ exports.typeHint = function(d){return "Tingueu en compte que els parèntesis i e
 
 exports.workspaceHeader = function(d){return "Monta els teus blocs aquí: "};
 
-exports.workspaceHeaderJavaScript = function(d){return "Type your JavaScript code here"};
+exports.workspaceHeaderJavaScript = function(d){return "Escriviu el vostre codi JavaScript aquí"};
 
 exports.infinity = function(d){return "Infinit"};
 
@@ -14677,14 +14702,14 @@ exports.hintHeader = function(d){return "Aquí tens una pista:"};
 
 exports.genericFeedback = function(d){return "Observa com has acabat i prova d'arreglar el teu programa."};
 
-exports.defaultTwitterText = function(d){return "Check out what I made"};
+exports.defaultTwitterText = function(d){return "Comprova el que he fet"};
 
 
 },{"messageformat":57}],45:[function(require,module,exports){
 var MessageFormat = require("messageformat");MessageFormat.locale.ca=function(n){return n===1?"one":"other"}
 exports.blocksUsed = function(d){return "Blocs utilitzats: %1"};
 
-exports.branches = function(d){return "branches"};
+exports.branches = function(d){return "branques"};
 
 exports.catColour = function(d){return "Color"};
 
@@ -14702,27 +14727,27 @@ exports.catLogic = function(d){return "Lògic"};
 
 exports.colourTooltip = function(d){return "Canvia el color del llapis."};
 
-exports.createACircle = function(d){return "create a circle"};
+exports.createACircle = function(d){return "crear un cercle"};
 
-exports.createSnowflakeSquare = function(d){return "create a snowflake of type square"};
+exports.createSnowflakeSquare = function(d){return "crear un floc de neu de quadrat"};
 
-exports.createSnowflakeParallelogram = function(d){return "create a snowflake of type parallelogram"};
+exports.createSnowflakeParallelogram = function(d){return "crear un floc de neu de paral·lelogram"};
 
-exports.createSnowflakeLine = function(d){return "create a snowflake of type line"};
+exports.createSnowflakeLine = function(d){return "crear un floc de neu de línia"};
 
-exports.createSnowflakeSpiral = function(d){return "create a snowflake of type spiral"};
+exports.createSnowflakeSpiral = function(d){return "crear un floc de neu d'espiral"};
 
-exports.createSnowflakeFlower = function(d){return "create a snowflake of type flower"};
+exports.createSnowflakeFlower = function(d){return "crear un floc de neu de flor"};
 
-exports.createSnowflakeFractal = function(d){return "create a snowflake of type fractal"};
+exports.createSnowflakeFractal = function(d){return "crear un floc de neu fractal"};
 
-exports.createSnowflakeRandom = function(d){return "create a snowflake of type random"};
+exports.createSnowflakeRandom = function(d){return "crear un floc de neu de tipus aleatori"};
 
-exports.createASnowflakeBranch = function(d){return "create a snowflake branch"};
+exports.createASnowflakeBranch = function(d){return "crear una branca de floc de neu"};
 
 exports.degrees = function(d){return "graus"};
 
-exports.depth = function(d){return "depth"};
+exports.depth = function(d){return "profunditat"};
 
 exports.dots = function(d){return "píxels"};
 
@@ -14732,33 +14757,33 @@ exports.drawATriangle = function(d){return "Dibuixa un triangle"};
 
 exports.drawACircle = function(d){return "Dibuixa un cercle"};
 
-exports.drawAFlower = function(d){return "draw a flower"};
+exports.drawAFlower = function(d){return "dibuixa una flor"};
 
-exports.drawAHexagon = function(d){return "draw a hexagon"};
+exports.drawAHexagon = function(d){return "dibuixa un hexàgon"};
 
 exports.drawAHouse = function(d){return "Dibuixa una casa"};
 
-exports.drawAPlanet = function(d){return "draw a planet"};
+exports.drawAPlanet = function(d){return "dibuixa un planeta"};
 
-exports.drawARhombus = function(d){return "draw a rhombus"};
+exports.drawARhombus = function(d){return "dibuixa un rombe"};
 
-exports.drawARobot = function(d){return "draw a robot"};
+exports.drawARobot = function(d){return "dibuixa un robot"};
 
-exports.drawARocket = function(d){return "draw a rocket"};
+exports.drawARocket = function(d){return "dibuixa un coet"};
 
-exports.drawASnowflake = function(d){return "draw a snowflake"};
+exports.drawASnowflake = function(d){return "dibuixa un floc de neu"};
 
 exports.drawASnowman = function(d){return "dibuixa un ninot de neu"};
 
-exports.drawAStar = function(d){return "draw a star"};
+exports.drawAStar = function(d){return "dibuixa una estrella"};
 
 exports.drawATree = function(d){return "Dibuixa un arbre"};
 
-exports.drawUpperWave = function(d){return "draw upper wave"};
+exports.drawUpperWave = function(d){return "dibuixa una onada alta"};
 
-exports.drawLowerWave = function(d){return "draw lower wave"};
+exports.drawLowerWave = function(d){return "dibuixa una onada baixa"};
 
-exports.drawStamp = function(d){return "draw stamp"};
+exports.drawStamp = function(d){return "dibuixa un segell"};
 
 exports.heightParameter = function(d){return "alçcada"};
 
@@ -14772,15 +14797,15 @@ exports.jumpForward = function(d){return "salta cap endevant"};
 
 exports.jumpTooltip = function(d){return "Mou l'artista sense deixar ninguna marca."};
 
-exports.jumpEastTooltip = function(d){return "Moves the artist east without leaving any marks."};
+exports.jumpEastTooltip = function(d){return "Desplaça l'artista a l'est sense deixar cap marca."};
 
-exports.jumpNorthTooltip = function(d){return "Moves the artist north without leaving any marks."};
+exports.jumpNorthTooltip = function(d){return "Desplaça l'artista al nord sense deixar cap marca."};
 
-exports.jumpSouthTooltip = function(d){return "Moves the artist south without leaving any marks."};
+exports.jumpSouthTooltip = function(d){return "Desplaça l'artista al sud sense deixar cap marca."};
 
-exports.jumpWestTooltip = function(d){return "Moves the artist west without leaving any marks."};
+exports.jumpWestTooltip = function(d){return "Desplaça l'artista a l'oest sense deixar cap marca."};
 
-exports.lengthFeedback = function(d){return "You got it right except for the lengths to move."};
+exports.lengthFeedback = function(d){return "És correcte excepte les longituds a moure's."};
 
 exports.lengthParameter = function(d){return "longitud"};
 
@@ -14788,17 +14813,17 @@ exports.loopVariable = function(d){return "comptador"};
 
 exports.moveBackward = function(d){return "retrocedeix"};
 
-exports.moveEastTooltip = function(d){return "Moves the artist east."};
+exports.moveEastTooltip = function(d){return "Desplaça l'artista cap a l'est."};
 
 exports.moveForward = function(d){return "avança"};
 
 exports.moveForwardTooltip = function(d){return "Avança l'artista."};
 
-exports.moveNorthTooltip = function(d){return "Moves the artist north."};
+exports.moveNorthTooltip = function(d){return "Desplaça l'artista cap al nord."};
 
-exports.moveSouthTooltip = function(d){return "Moves the artist south."};
+exports.moveSouthTooltip = function(d){return "Desplaça l'artista cap al sud."};
 
-exports.moveWestTooltip = function(d){return "Moves the artist west."};
+exports.moveWestTooltip = function(d){return "Desplaça l'artista cap a l'oest."};
 
 exports.moveTooltip = function(d){return "Avança o retrocedeix l'artista segons la quanitat especificada."};
 
@@ -14812,7 +14837,7 @@ exports.penTooltip = function(d){return "Aixeca o baixa el llapis per començar 
 
 exports.penUp = function(d){return "puja el llapis"};
 
-exports.reinfFeedbackMsg = function(d){return "S'assembla al que tu vols? Pots clicar en \"Intentar de nou\" per veure el teu dibuix."};
+exports.reinfFeedbackMsg = function(d){return "Aquí està el dibuix! Seguir treballant-hi o continuar all trencaclosques següent."};
 
 exports.setColour = function(d){return "defineix color"};
 
@@ -14820,15 +14845,15 @@ exports.setPattern = function(d){return "set pattern"};
 
 exports.setWidth = function(d){return "estableix l'amplada"};
 
-exports.shareDrawing = function(d){return "Share your drawing:"};
+exports.shareDrawing = function(d){return "Comparteix el teu dibuix:"};
 
 exports.showMe = function(d){return "Mostra'm"};
 
 exports.showTurtle = function(d){return "mostra l'artista"};
 
-exports.sizeParameter = function(d){return "size"};
+exports.sizeParameter = function(d){return "mida"};
 
-exports.step = function(d){return "step"};
+exports.step = function(d){return "pas"};
 
 exports.tooFewColours = function(d){return "Necessites utilitzar al menys %1 diferents colors per a aquest puzzle. Tu has utilitzat només %2."};
 
